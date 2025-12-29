@@ -1,2 +1,23 @@
-myenv
+myenv/
+env/
 .env
+__pycache__/
+.Python
+build/
+lib/
+
+*.md
+# Django
+staticfiles/
+*.log
+local_settings.py
+db.sqlite3
+db.sqlite3-journal
+staticfiles/
+media/
+static/
+
+# Git
+.git/
+.gitignore
+
