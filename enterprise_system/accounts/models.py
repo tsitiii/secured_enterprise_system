@@ -148,3 +148,230 @@ class PasswordResetToken(models.Model):
             models.Index(fields=['token']),
             models.Index(fields=['user']),
         ]
+
+
+# ============================================================================
+# Access Control & Policy Management Models (MAC, RBAC, ABAC)
+# ============================================================================
+
+class Role(models.Model):
+    """Role-Based Access Control (RBAC) - Defines roles in the system"""
+    name = models.CharField(max_length=100, unique=True)
+    description = models.TextField(blank=True)
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    
+    # Permissions associated with this role (stored as JSON or comma-separated)
+    permissions = models.JSONField(default=list, blank=True, help_text="List of permission strings")
+    
+    def __str__(self):
+        return self.name
+    
+    class Meta:
+        ordering = ['name']
+        indexes = [
+            models.Index(fields=['name']),
+            models.Index(fields=['is_active']),
+        ]
+
+
+class RoleHierarchy(models.Model):
+    """Defines hierarchical relationships between roles (e.g., Admin > Manager > Employee)"""
+    parent_role = models.ForeignKey(
+        Role, 
+        on_delete=models.CASCADE, 
+        related_name='child_roles',
+        help_text="Higher-level role"
+    )
+    child_role = models.ForeignKey(
+        Role, 
+        on_delete=models.CASCADE, 
+        related_name='parent_roles',
+        help_text="Lower-level role that inherits from parent"
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    
+    class Meta:
+        unique_together = [['parent_role', 'child_role']]
+        verbose_name_plural = "Role Hierarchies"
+        indexes = [
+            models.Index(fields=['parent_role', 'child_role']),
+        ]
+    
+    def __str__(self):
+        return f"{self.parent_role.name} > {self.child_role.name}"
+
+
+class UserRole(models.Model):
+    """Assigns roles to users (RBAC)"""
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='user_roles')
+    role = models.ForeignKey(Role, on_delete=models.CASCADE, related_name='user_assignments')
+    assigned_by = models.ForeignKey(
+        User, 
+        on_delete=models.SET_NULL, 
+        null=True, 
+        blank=True,
+        related_name='role_assignments_made'
+    )
+    assigned_at = models.DateTimeField(auto_now_add=True)
+    expires_at = models.DateTimeField(null=True, blank=True, help_text="Optional expiration for temporary roles")
+    is_active = models.BooleanField(default=True)
+    notes = models.TextField(blank=True, help_text="Optional notes about this assignment")
+    
+    def __str__(self):
+        return f"{self.user.username} - {self.role.name}"
+    
+    def is_expired(self):
+        """Check if role assignment has expired"""
+        if self.expires_at:
+            return timezone.now() > self.expires_at
+        return False
+    
+    class Meta:
+        unique_together = [['user', 'role']]
+        indexes = [
+            models.Index(fields=['user', 'role']),
+            models.Index(fields=['user', 'is_active']),
+            models.Index(fields=['expires_at']),
+        ]
+
+
+class RoleChangeRequest(models.Model):
+    """Requests for temporary or dynamic role changes requiring approval"""
+    STATUS_CHOICES = [
+        ('pending', 'Pending'),
+        ('approved', 'Approved'),
+        ('rejected', 'Rejected'),
+        ('expired', 'Expired'),
+    ]
+    
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='role_change_requests')
+    requested_role = models.ForeignKey(Role, on_delete=models.CASCADE, related_name='change_requests')
+    current_roles = models.JSONField(default=list, help_text="Current roles of the user")
+    reason = models.TextField(help_text="Reason for role change request")
+    requested_by = models.ForeignKey(
+        User, 
+        on_delete=models.CASCADE, 
+        related_name='role_requests_made',
+        help_text="User who made the request"
+    )
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending')
+    requested_at = models.DateTimeField(auto_now_add=True)
+    expires_at = models.DateTimeField(null=True, blank=True, help_text="When the temporary role should expire")
+    reviewed_by = models.ForeignKey(
+        User, 
+        on_delete=models.SET_NULL, 
+        null=True, 
+        blank=True,
+        related_name='role_requests_reviewed'
+    )
+    reviewed_at = models.DateTimeField(null=True, blank=True)
+    review_notes = models.TextField(blank=True)
+    
+    def __str__(self):
+        return f"{self.user.username} - {self.requested_role.name} ({self.status})"
+    
+    def is_expired(self):
+        """Check if request has expired"""
+        if self.expires_at:
+            return timezone.now() > self.expires_at
+        return False
+    
+    class Meta:
+        ordering = ['-requested_at']
+        indexes = [
+            models.Index(fields=['user', 'status']),
+            models.Index(fields=['status', 'requested_at']),
+            models.Index(fields=['expires_at']),
+        ]
+
+
+class DataClassification(models.Model):
+    """Mandatory Access Control (MAC) - Security classifications for data"""
+    CLASSIFICATION_CHOICES = [
+        ('Public', 'Public'),
+        ('Internal', 'Internal'),
+        ('Confidential', 'Confidential'),
+        ('Secret', 'Secret'),
+        ('Top Secret', 'Top Secret'),
+    ]
+    
+    name = models.CharField(max_length=200, unique=True, help_text="Name/identifier for the data resource")
+    classification = models.CharField(max_length=20, choices=CLASSIFICATION_CHOICES)
+    description = models.TextField(blank=True)
+    resource_type = models.CharField(
+        max_length=100, 
+        blank=True,
+        help_text="Type of resource (e.g., 'document', 'database', 'api_endpoint')"
+    )
+    resource_id = models.CharField(
+        max_length=255, 
+        blank=True,
+        help_text="Identifier for the specific resource"
+    )
+    classified_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, related_name='data_classifications')
+    classified_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    
+    def __str__(self):
+        return f"{self.name} - {self.classification}"
+    
+    class Meta:
+        ordering = ['-classified_at']
+        indexes = [
+            models.Index(fields=['classification']),
+            models.Index(fields=['resource_type', 'resource_id']),
+        ]
+
+
+class PermissionPolicy(models.Model):
+    """Attribute-Based Access Control (ABAC) - Policy rules for access decisions"""
+    name = models.CharField(max_length=200, unique=True)
+    description = models.TextField(blank=True)
+    
+    # Policy conditions (stored as JSON for flexibility)
+    # Example: {"role": ["admin", "manager"], "department": ["IT", "Finance"], "location": ["HQ"], "time_range": {"start": "09:00", "end": "17:00"}}
+    conditions = models.JSONField(
+        default=dict,
+        help_text="Policy conditions (role, department, location, time, etc.)"
+    )
+    
+    # Resource attributes this policy applies to
+    resource_type = models.CharField(max_length=100, blank=True)
+    resource_classification = models.CharField(
+        max_length=20, 
+        choices=DataClassification.CLASSIFICATION_CHOICES,
+        blank=True,
+        help_text="Minimum classification level required"
+    )
+    
+    # Action allowed by this policy
+    action = models.CharField(
+        max_length=100,
+        help_text="Action allowed (e.g., 'read', 'write', 'delete', 'execute')"
+    )
+    
+    # Effect: allow or deny
+    EFFECT_CHOICES = [
+        ('allow', 'Allow'),
+        ('deny', 'Deny'),
+    ]
+    effect = models.CharField(max_length=10, choices=EFFECT_CHOICES, default='allow')
+    
+    is_active = models.BooleanField(default=True)
+    priority = models.IntegerField(default=0, help_text="Higher priority policies are evaluated first")
+    created_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, related_name='policies_created')
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    
+    def __str__(self):
+        return f"{self.name} - {self.effect}"
+    
+    class Meta:
+        ordering = ['-priority', 'name']
+        verbose_name_plural = "Permission Policies"
+        indexes = [
+            models.Index(fields=['is_active', 'priority']),
+            models.Index(fields=['resource_type', 'resource_classification']),
+        ]
