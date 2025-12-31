@@ -123,6 +123,11 @@ class VerifyCaptchaView(APIView):
             })
             result = response.json()
             
+            # Debug logging
+            print(f"CAPTCHA Debug - Secret: {settings.RECAPTCHA_SECRET_KEY[:10]}...")
+            print(f"CAPTCHA Debug - Token: {captcha_token[:20]}...")
+            print(f"CAPTCHA Debug - Result: {result}")
+            
             if result.get('success'):
                 return Response({
                     'success': True,
@@ -130,7 +135,8 @@ class VerifyCaptchaView(APIView):
                 }, status=status.HTTP_200_OK)
             else:
                 return Response({
-                    'error': 'CAPTCHA verification failed'
+                    'error': 'CAPTCHA verification failed',
+                    'details': result.get('error-codes', [])
                 }, status=status.HTTP_400_BAD_REQUEST)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
