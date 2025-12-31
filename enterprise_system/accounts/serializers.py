@@ -3,7 +3,11 @@ from django.contrib.auth.models import User
 from django.contrib.auth.password_validation import validate_password
 from django.utils import timezone
 from datetime import timedelta
-from .models import UserProfile, VerificationToken, PasswordResetToken
+from .models import (
+    UserProfile, VerificationToken, PasswordResetToken,
+    Role, RoleHierarchy, UserRole, RoleChangeRequest, 
+    DataClassification, PermissionPolicy
+)
 from .utils import (
     generate_verification_token, send_verification_email, send_password_reset_email,
     validate_password_complexity, generate_mfa_secret, generate_mfa_qr_code,
@@ -287,4 +291,162 @@ class UserUpdateSerializer(serializers.ModelSerializer):
             profile.save()
         
         return instance
+
+
+# ============================================================================
+# Access Control & Policy Management Serializers
+# ============================================================================
+
+class RoleSerializer(serializers.ModelSerializer):
+    """Serializer for Role model"""
+    child_roles = serializers.SerializerMethodField()
+    parent_roles = serializers.SerializerMethodField()
+    user_count = serializers.SerializerMethodField()
+    
+    class Meta:
+        model = Role
+        fields = ('id', 'name', 'description', 'permissions', 'is_active', 
+                  'created_at', 'updated_at', 'child_roles', 'parent_roles', 'user_count')
+        read_only_fields = ('id', 'created_at', 'updated_at')
+    
+    def get_child_roles(self, obj):
+        """Get child roles in hierarchy"""
+        return [{'id': cr.child_role.id, 'name': cr.child_role.name} 
+                for cr in obj.child_roles.all()]
+    
+    def get_parent_roles(self, obj):
+        """Get parent roles in hierarchy"""
+        return [{'id': pr.parent_role.id, 'name': pr.parent_role.name} 
+                for pr in obj.parent_roles.all()]
+    
+    def get_user_count(self, obj):
+        """Get count of users with this role"""
+        return obj.user_assignments.filter(is_active=True).count()
+
+
+class RoleHierarchySerializer(serializers.ModelSerializer):
+    """Serializer for Role Hierarchy"""
+    parent_role_name = serializers.CharField(source='parent_role.name', read_only=True)
+    child_role_name = serializers.CharField(source='child_role.name', read_only=True)
+    
+    class Meta:
+        model = RoleHierarchy
+        fields = ('id', 'parent_role', 'parent_role_name', 'child_role', 'child_role_name', 'created_at')
+        read_only_fields = ('id', 'created_at')
+
+
+class UserRoleSerializer(serializers.ModelSerializer):
+    """Serializer for User-Role assignments"""
+    username = serializers.CharField(source='user.username', read_only=True)
+    user_email = serializers.EmailField(source='user.email', read_only=True)
+    role_name = serializers.CharField(source='role.name', read_only=True)
+    assigned_by_username = serializers.CharField(source='assigned_by.username', read_only=True, allow_null=True)
+    is_expired = serializers.SerializerMethodField()
+    
+    class Meta:
+        model = UserRole
+        fields = ('id', 'user', 'username', 'user_email', 'role', 'role_name', 
+                  'assigned_by', 'assigned_by_username', 'assigned_at', 
+                  'expires_at', 'is_active', 'notes', 'is_expired')
+        read_only_fields = ('id', 'assigned_at')
+    
+    def get_is_expired(self, obj):
+        return obj.is_expired()
+
+
+class RoleAssignSerializer(serializers.Serializer):
+    """Serializer for assigning roles to users"""
+    user_id = serializers.IntegerField(required=True)
+    role_id = serializers.IntegerField(required=True)
+    expires_at = serializers.DateTimeField(required=False, allow_null=True)
+    notes = serializers.CharField(required=False, allow_blank=True)
+    
+    def validate_user_id(self, value):
+        try:
+            User.objects.get(id=value)
+        except User.DoesNotExist:
+            raise serializers.ValidationError("User not found")
+        return value
+    
+    def validate_role_id(self, value):
+        try:
+            Role.objects.get(id=value, is_active=True)
+        except Role.DoesNotExist:
+            raise serializers.ValidationError("Role not found or inactive")
+        return value
+
+
+class RoleChangeRequestSerializer(serializers.ModelSerializer):
+    """Serializer for role change requests"""
+    username = serializers.CharField(source='user.username', read_only=True)
+    requested_role_name = serializers.CharField(source='requested_role.name', read_only=True)
+    requested_by_username = serializers.CharField(source='requested_by.username', read_only=True)
+    reviewed_by_username = serializers.CharField(source='reviewed_by.username', read_only=True, allow_null=True)
+    is_expired = serializers.SerializerMethodField()
+    
+    class Meta:
+        model = RoleChangeRequest
+        fields = ('id', 'user', 'username', 'requested_role', 'requested_role_name',
+                  'current_roles', 'reason', 'requested_by', 'requested_by_username',
+                  'status', 'requested_at', 'expires_at', 'reviewed_by', 
+                  'reviewed_by_username', 'reviewed_at', 'review_notes', 'is_expired')
+        read_only_fields = ('id', 'requested_at', 'reviewed_at', 'status', 
+                          'reviewed_by', 'current_roles')
+    
+    def get_is_expired(self, obj):
+        return obj.is_expired()
+
+
+class RoleChangeRequestCreateSerializer(serializers.Serializer):
+    """Serializer for creating role change requests"""
+    role_id = serializers.IntegerField(required=True)
+    reason = serializers.CharField(required=True)
+    expires_at = serializers.DateTimeField(required=False, allow_null=True)
+    
+    def validate_role_id(self, value):
+        try:
+            Role.objects.get(id=value, is_active=True)
+        except Role.DoesNotExist:
+            raise serializers.ValidationError("Role not found or inactive")
+        return value
+
+
+class DataClassificationSerializer(serializers.ModelSerializer):
+    """Serializer for data classification (MAC)"""
+    classified_by_username = serializers.CharField(source='classified_by.username', read_only=True, allow_null=True)
+    
+    class Meta:
+        model = DataClassification
+        fields = ('id', 'name', 'classification', 'description', 'resource_type', 
+                  'resource_id', 'classified_by', 'classified_by_username', 
+                  'classified_at', 'updated_at')
+        read_only_fields = ('id', 'classified_at', 'updated_at', 'classified_by')
+
+
+class DataClassifySerializer(serializers.Serializer):
+    """Serializer for classifying data"""
+    name = serializers.CharField(required=True)
+    classification = serializers.ChoiceField(
+        choices=DataClassification.CLASSIFICATION_CHOICES,
+        required=True
+    )
+    description = serializers.CharField(required=False, allow_blank=True)
+    resource_type = serializers.CharField(required=False, allow_blank=True)
+    resource_id = serializers.CharField(required=False, allow_blank=True)
+
+
+class PermissionCheckSerializer(serializers.Serializer):
+    """Serializer for permission check request (Policy Decision Point)"""
+    action = serializers.CharField(required=True, help_text="Action to check (e.g., 'read', 'write', 'delete')")
+    resource_type = serializers.CharField(required=False, allow_blank=True)
+    resource_id = serializers.CharField(required=False, allow_blank=True)
+    resource_classification = serializers.ChoiceField(
+        choices=DataClassification.CLASSIFICATION_CHOICES,
+        required=False,
+        allow_blank=True
+    )
+    # Optional context attributes for ABAC
+    department = serializers.CharField(required=False, allow_blank=True)
+    location = serializers.CharField(required=False, allow_blank=True)
+    time = serializers.DateTimeField(required=False, allow_null=True)
 

@@ -14,11 +14,19 @@ urlpatterns = [
     path('auth/password-reset', views.PasswordResetView.as_view(), name='password-reset'),
     path('auth/password-reset/confirm', views.PasswordResetConfirmView.as_view(), name='password-reset-confirm'),
     
-    # User profile endpoint (current user)
+    # '''User profile endpoint (current user)'''
+    
     path('user/profile', views.UserProfileView.as_view(), name='user-profile'),
     
     # User management endpoints
     path('users/', views.UserListView.as_view(), name='user-list'),
     path('users/<int:pk>/', views.UserDetailView.as_view(), name='user-detail'),
+    
+    # Access Control & Policy Management endpoints
+    path('admin/roles', views.RoleListView.as_view(), name='role-list'),
+    path('admin/roles/assign', views.RoleAssignView.as_view(), name='role-assign'),
+    path('admin/roles/request-change', views.RoleChangeRequestView.as_view(), name='role-request-change'),
+    path('data/classify', views.DataClassifyView.as_view(), name='data-classify'),
+    path('permissions/check', views.PermissionCheckView.as_view(), name='permission-check'),
 ]
 

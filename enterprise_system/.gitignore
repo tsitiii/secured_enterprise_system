@@ -2,6 +2,7 @@ myenv/
 env/
 .env
 __pycache__/
+__pycache__
 .Python
 build/
 lib/
