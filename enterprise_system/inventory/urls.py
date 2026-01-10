@@ -8,7 +8,7 @@ urlpatterns = [
     path('inventory/share', views.ResourceShareView.as_view(), name='inventory-share'),
     path('inventory/permissions-log/<int:item_id>', views.PermissionLogListView.as_view(), name='permissions-log'),
     
-    # Procurement & Rule-Based Access Control (RuBAC)
+    # Procurement & Rule-Based Access Control //RuBAC
     path('procurement/purchase-orders', views.PurchaseOrderCreateView.as_view(), name='purchase-orders'),
     path('procurement/pending-approvals', views.PendingApprovalsView.as_view(), name='pending-approvals'),
     
