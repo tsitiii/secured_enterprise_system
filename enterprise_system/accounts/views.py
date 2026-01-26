@@ -39,7 +39,7 @@ from drf_spectacular.types import OpenApiTypes
 
 
 class RegisterView(APIView):
-    """POST /api/auth/register - User registration with email verification"""
+    """POST /api/auth/register - User registration with email verificationnn"""
     permission_classes = [permissions.AllowAny]
 
     @extend_schema(
