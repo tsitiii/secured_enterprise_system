@@ -1,1 +1,1 @@
-enterprise sysytem
+enterprise system
